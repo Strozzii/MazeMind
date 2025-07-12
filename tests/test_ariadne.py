@@ -4,7 +4,8 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 import importlib
 
-from src.common.models import CveFinding, CweFinding, CweInfo
+from src.ariadne.core import generate_final_score
+from src.common.models import CveFinding, CweFinding, CweInfo, CyberRiskScore, ScanResult
 from src.ariadne.data_prep import prepare_features
 from src.ariadne import model_predict
 
@@ -150,6 +151,75 @@ class TestAriadneModelPredict(unittest.TestCase):
 
         # The function should catch the KeyError and return 0.0
         self.assertEqual(risk_adjustment, 0.0)
+
+
+class TestAriadneCore(unittest.TestCase):
+    """
+    Tests the core orchestration logic of the ARIADNE module.
+    """
+
+    def setUp(self):
+        """Set up a sample ScanResult for testing."""
+        self.cve_finding = CveFinding(id="cve-high", cve_id="CVE-1", score=8.0, description="d", location="l")
+        self.cwe_finding = CweFinding(id="cwe-low", cwe=CweInfo(id="CWE-1", name="n"), score=3.0, description="d",
+                                      location="l")
+        self.scan_result = ScanResult(
+            company_id="test-company-123",
+            cve_findings=[self.cve_finding],
+            cwe_findings=[self.cwe_finding]
+        )
+
+    @patch('src.ariadne.core.predict_risk_adjustment')
+    @patch('src.ariadne.core.prepare_features')
+    def test_generate_final_score_calculation(self, mock_prepare_features, mock_predict_adjustment):
+        """
+        Tests the final score calculation logic with mocked dependencies.
+        """
+        # --- Arrange ---
+        # Define the return values for our mocked functions
+        mock_prepare_features.return_value = {"some_feature": 1.0}
+        mock_predict_adjustment.return_value = 0.5  # 50% risk adjustment
+
+        base_score = 8.0
+        # Expected calculation: 8.0 + (10.0 - 8.0) * 0.5 = 8.0 + 2.0 * 0.5 = 9.0
+        expected_final_score = 9.0
+
+        # --- Act ---
+        result_crs = generate_final_score(self.scan_result, base_score)
+
+        # --- Assert ---
+        # Check that our mocks were called correctly
+        mock_prepare_features.assert_called_once()
+        mock_predict_adjustment.assert_called_once_with({"some_feature": 1.0})
+
+        # Check the final CyberRiskScore object
+        self.assertIsInstance(result_crs, CyberRiskScore)
+        self.assertEqual(result_crs.company_id, "test-company-123")
+        self.assertEqual(result_crs.base_score, base_score)
+        self.assertAlmostEqual(result_crs.crs_score, expected_final_score, places=5)
+
+        # Check that the key risk factor was identified correctly (the one with the highest score)
+        self.assertIn("cve-high", result_crs.key_risk_factors)
+
+    @patch('src.ariadne.core.predict_risk_adjustment', return_value=0.0)
+    @patch('src.ariadne.core.prepare_features', return_value={})
+    def test_final_score_with_zero_adjustment(self, mock_prepare, mock_predict):
+        """
+        Tests that if the risk adjustment is 0, the final score equals the base score.
+        """
+        base_score = 7.5
+        result_crs = generate_final_score(self.scan_result, base_score)
+        self.assertEqual(result_crs.crs_score, base_score)
+
+    @patch('src.ariadne.core.predict_risk_adjustment', return_value=1.0)
+    @patch('src.ariadne.core.prepare_features', return_value={})
+    def test_final_score_with_full_adjustment(self, mock_prepare, mock_predict):
+        """
+        Tests that if the risk adjustment is 1.0, the final score is 10.0.
+        """
+        base_score = 6.0
+        result_crs = generate_final_score(self.scan_result, base_score)
+        self.assertEqual(result_crs.crs_score, 10.0)
 
 
 if __name__ == '__main__':
