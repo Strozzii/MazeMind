@@ -18,19 +18,3 @@ jobs:
 
     - name: Check Python syntax
       run: python -m compileall .
-
-    - name: Notify Discord on success
-      if: success()
-      run: |
-        curl -H "Content-Type: application/json" \
-             -X POST \
-             -d '{"content": "Build erfolgreich auf `main`"}' \
-             ${{ secrets.DISCORD_WEBHOOK_URL }}
-
-    - name: Notify Discord on failure
-      if: failure()
-      run: |
-        curl -H "Content-Type: application/json" \
-             -X POST \
-             -d '{"content": "Build fehlgeschlagen auf `main`"}' \
-             ${{ secrets.DISCORD_WEBHOOK_URL }}
